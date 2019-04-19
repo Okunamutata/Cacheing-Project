@@ -1,0 +1,3 @@
+Hi all whats good,
+Just testing git commands in the terminal
+
