@@ -1,33 +1,46 @@
 #!/bin/bash
-export compile="gcc -std=c99 -Wall -c -g "
+export compile="gcc -std=c99 -Wall -c -g -fPIC"
 
-$compile -o -fPIC objs/storage.o           storage.c
-$compile -o -fPIC objs/trace.o             trace.c
-$compile -o -fPIC objs/memory.o            memory.c
-$compile -o -fPic objs/cache_direct.o      cache_direct.c
-$compile -o -fPic objs/cache_associative_full.o cache_associative_full.c
-$compile -o -fPic objs/cache_associative_nway.o cache_associative_nway.c
+$compile -o objs/storage.o           storage.c
+$compile -o objs/trace.o             trace.c
+$compile -o objs/memory.o            memory.c
+$compile -o objs/cache_direct.o      cache_direct.c
+$compile -o objs/cache_associative_full.o cache_associative_full.c
+$compile -o objs/cache_associative_nway.o cache_associative_nway.c
 
+gcc -shared -o libfoo.so objs/*.o
 
-gcc -shared -o libfoo.sc obj/*.o
+gcc -std=c99 -Wall -g  \
+    -o test1 test1.c \
+    -L. -lfoo
 
+gcc -std=c99 -Wall -g  \
+    -o test1a test1a.c \
+    -L. -lfoo
+gcc -std=c99 -Wall -g \
+    -o test2 test2.c \
+    -L. -lfoo
 
+gcc -std=c99 -Wall -g \
+    -o test3 test3.c \
+    -L. -lfoo
 
-gcc test1.c –o test1 -L. –lfoo
+gcc -std=c99 -Wall -g \
+    -o test_matrix_sum_16x16 test_matrix_sum_16x16.c \
+    -L. -lfoo
 
-gcc test1a.c –o test1a -L. –lfoo
+gcc -std=c99 -Wall -g \
+    -o test_matrix_sum_8x4 test_matrix_sum_8x4.c \
+    -L. -lfoo
 
-gcc test1a.c –o test1a -L. –lfoo
+gcc -std=c99 -Wall -g \
+    -o test_transpose_8x8 test_transpose_8x8.c \
+    -L. -lfoo
 
-gcc test3.c -o test3 -L. -libfoo
+gcc -std=c99 -Wall -g \
+    -o test_transpose_8x8_improved test_transpose_8x8_improved.c \
+    -L. -lfoo
 
-gcc test_matrix_sum_16x16.c -o test_matrix_sum_16x16 -L. -libfoo
+ldd test_transpose_8x8
 
-gcc test_matrix_sum_8x4.c -o test_matrix_sum_8x4 -L. -libfoo
-
-gcc test_transpose_8x8.c -o test_transpose_8x8 -L. -libfoo
-
-gcc test_transpose_8x8_improved.c -o test_transpose_8x8_improved -L. -libfoo
-
-export LD_LIBRARY_PATH=/Users/tokunna/GitHub/Cacheing-Project/Cacheing-Project/libs
-
+export LD_LIBRARY_PATH=/Users/nolanbisogno/Desktop/Cacheing-Project/libs
