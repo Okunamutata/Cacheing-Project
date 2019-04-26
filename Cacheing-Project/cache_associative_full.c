@@ -1,77 +1,147 @@
-#include "storage.h"
-#include "cache_associative_full.h"
 #include <stdio.h>
+#include <stdbool.h>
+#include <string.h>
+#include "cache_associative_full.h"
 
-struct Block{
-    int valid;
+struct NWAY_CACHE{
+    bool valid;
+    bool dirty;
     int tag;
-    int dirty;
-    int data[4];
-};
+    unsigned char block[CACHE_BLOCK_SIZE];
+    double timestamp;
+}fa_cache[CACHE_ENTRIES];
 
-static struct Block block[16];
-static int hits;
-static int misses;
+static int hits,
+           misses;
 
-void cache_direct_init(){
-    int i, j;
+static double time;
+
+void cache_associative_full_init(){
+    int i;
     for(i = 0; i < CACHE_ENTRIES; i++){
-        block[i].valid = 0;
-        block[i].tag = 0;
-        block[i].dirty = 0;
-        for(j = 0; j < CACHE_BLOCK_SIZE; j++){
-            block[i].data[j] = 0;
-        }
+        fa_cache[i].valid = false;
+        fa_cache[i].dirty = false;
+        fa_cache[i].timestamp = 0;
     }
 
     hits = 0;
     misses = 0;
+    time = 0;
 }
 
-int cache_direct_load(memory_address addr){
-    int tag = addr & 0xFFFFFF00;
-    int set = addr & 0x000000F0;
-    int off = addr & 0x0000000F;
+int cache_associative_full_load(memory_address addr){
+    int off =  addr       & 0xF;
+    int tag = (addr >> 4) & 0xFFFFFFF;
 
-    if(block[set].valid == 1 && block[set].tag == tag){
-        hits++;
-        return block[set].data[off];
-    }else{
-        misses++;
-        return storage_load(addr);
-    }
-}
+    unsigned int value;
 
-void cache_direct_store(memory_address addr, int value){
-    int tag = (addr & 0xFFFFFF00) >> 8;
-    int set = (addr & 0x000000F0) >> 4;
-    int off = addr & 0x0000000F;
-
-    if(block[set].valid == 1 && block[set].tag == tag){
-        hits++;
-        block[set].data[off] = value;
-    }else{
-        misses++;
-        block[set].tag = tag;
-        block[set].valid = 1;
-        block[set].data[off] = value;
-    }
-}
-
-void cache_direct_flush(){
-    memory_address addr;
-    int set, off;
-    for(set = 0; set < CACHE_ENTRIES; set++){
-        if(block[set].dirty == 1){
-            int tag = block[set].tag;
-            for(off = 0; off < OFFSET_BITS; off++){
-                addr = (tag << 8) & (set << 4) & off;
-                storage_store(addr, block[set].data[off]);
-            }
+    int i;
+    for(i = 0; i < CACHE_ENTRIES; i++){
+        if(fa_cache[i].valid && fa_cache[i].tag == tag){
+            hits++;
+            memcpy(&value, &fa_cache[i].block[off], OFFSET_BITS);
+            fa_cache[i].timestamp = time++;
+            fa_cache[i].valid = true;
+            fa_cache[i].dirty = true;
+            return value;
         }
     }
+
+    misses++;
+    for(i = 0; i < CACHE_ENTRIES; i++){
+        if(!fa_cache[i].valid){
+            storage_load_line((addr & ~0xF), fa_cache[i].block);
+            memcpy(&value, &fa_cache[i].block[off], OFFSET_BITS);	
+            fa_cache[i].timestamp = time++;
+            fa_cache[i].valid = true;
+            fa_cache[i].dirty = true;
+            fa_cache[i].tag = tag;
+            return value;
+        }
+    }
+
+    double least_used = fa_cache[0].timestamp;
+    int location = 0;
+    for(i = 0; i < CACHE_ENTRIES; i++){
+        if(least_used > fa_cache[i].timestamp){
+            least_used = fa_cache[i].timestamp;
+            location = i;
+        }
+    }
+
+    if(fa_cache[location].dirty){
+        storage_store_line((fa_cache[location].tag << 4), fa_cache[location].block);
+        fa_cache[location].dirty = false;
+    }
+    storage_load_line((addr & ~0xF), fa_cache[location].block);
+    memcpy(&value, &fa_cache[location].block[off], OFFSET_BITS);
+    fa_cache[location].timestamp = time++;
+    fa_cache[location].valid = true;
+    fa_cache[location].dirty = true;
+    fa_cache[location].tag = tag;
+    return value;
 }
 
-void cache_direct_stats(){
+void cache_associative_full_store(memory_address addr, int value){
+    int off =  addr       & 0xF;
+    int tag = (addr >> 4) & 0xFFFFFFF;
+
+    int i;
+    for(i = 0; i < CACHE_ENTRIES; i++){
+        if(fa_cache[i].valid && fa_cache[i].tag == tag){
+            hits++;
+            memcpy(&fa_cache[i].block[off], &value, OFFSET_BITS);
+            fa_cache[i].timestamp = time++;
+            fa_cache[i].valid = true;
+            fa_cache[i].dirty = true;
+            return;
+        }
+    }
+
+    misses++;
+    for(i = 0; i < CACHE_ENTRIES; i++){
+        if(!fa_cache[i].valid){
+            storage_load_line((addr & ~0xF), fa_cache[i].block);
+            memcpy(&fa_cache[i].block[off], &value, OFFSET_BITS);            fa_cache[i].timestamp = time++;
+            fa_cache[i].valid = true;
+            fa_cache[i].dirty = true;
+            fa_cache[i].tag = tag;
+            return;
+        }
+    }
+
+    double least_used = fa_cache[0].timestamp;
+    int location = 0;
+    for(i = 0; i < CACHE_ENTRIES; i++){
+        if(least_used > fa_cache[i].timestamp){
+            least_used = fa_cache[i].timestamp;
+            location = i;
+        }
+    }
+
+    if(fa_cache[location].dirty){
+        storage_store_line((fa_cache[location].tag << 4), fa_cache[location].block);
+        fa_cache[location].dirty = false;
+    }
+    storage_load_line((addr & ~0xF), fa_cache[location].block);
+    memcpy(&fa_cache[i].block[off], &value, OFFSET_BITS);
+    fa_cache[location].timestamp = time++;
+    fa_cache[location].valid = true;
+    fa_cache[location].dirty = true;
+    fa_cache[location].tag = tag;
+    return;
+}
+
+void cache_associative_full_flush(){
+    memory_address addr;
+    int i;
+    for(i = 0; i < CACHE_ENTRIES; i++){
+        addr = fa_cache[i].tag << 4;
+        storage_store_line(addr, fa_cache[i].block);
+        fa_cache[i].dirty = false;
+    }
+}
+
+void cache_associative_nway_stats(){
     printf("cache direct stats:  hits: %d  misses: %d", hits, misses);
 }

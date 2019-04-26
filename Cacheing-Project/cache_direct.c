@@ -1,27 +1,23 @@
-#include "storage.h"
-#include "cache_direct.h"
 #include <stdio.h>
+#include <string.h>
+#include <stdbool.h>
+#include "cache_direct.h"
 
-struct Block{
-    int valid;
+struct DIRECT_CACHE{
+    bool valid;
+    bool dirty;
     int tag;
-    int dirty;
-    int data[4];
-};
+    unsigned char block[CACHE_BLOCK_SIZE];
+} d_cache[CACHE_ENTRIES];
 
-static struct Block block[16];
-static int hits;
-static int misses;
+static int hits,
+           misses;
 
 void cache_direct_init(){
-    int i, j;
+    int i;
     for(i = 0; i < CACHE_ENTRIES; i++){
-        block[i].valid = 0;
-        block[i].tag = 0;
-        block[i].dirty = 0;
-        for(j = 0; j < CACHE_BLOCK_SIZE; j++){
-            block[i].data[j] = 0;
-        }
+        d_cache[i].valid = false;
+        d_cache[i].dirty = false;
     }
 
     hits = 0;
@@ -29,49 +25,58 @@ void cache_direct_init(){
 }
 
 int cache_direct_load(memory_address addr){
-    int tag = addr & 0xFFFFFF00;
-    int set = addr & 0x000000F0;
-    int off = addr & 0x0000000F;
+    int off =  addr       & 0xF;
+    int set = (addr >> 4) & 0xF;
+    int tag = (addr >> 8) & 0xFFFFFF;
 
-    if(block[set].valid == 1 && block[set].tag == tag){
+    unsigned int value;
+
+    if(d_cache[set].valid && d_cache[set].tag == tag){
         hits++;
-        return block[set].data[off];
     }else{
         misses++;
-        return storage_load(addr);
+        if(d_cache[set].dirty){
+            storage_store_line((addr & ~0xF), d_cache[set].block);
+            d_cache[set].dirty = false;
+        }
+        storage_load_line((addr & ~0xF), d_cache[set].block);
+        d_cache[set].valid = true;
+        d_cache[set].tag = tag;
     }
+    memcpy(&value, &d_cache[set].block[off], OFFSET_BITS); 
+    return value;
 }
 
 void cache_direct_store(memory_address addr, int value){
-    int tag = (addr & 0xFFFFFF00) >> 8;
-    int set = (addr & 0x000000F0) >> 4;
-    int off = addr & 0x0000000F;
+    int off =  addr       & 0xF;
+    int set = (addr >> 4) & 0xF;
+    int tag = (addr >> 8) & 0xFFFFFF;
 
-    if(block[set].valid == 1 && block[set].tag == tag){
+    if(d_cache[set].valid && d_cache[set].tag == tag){
         hits++;
-        block[set].data[off] = value;
+        memcpy(&d_cache[set].block[off], &value, OFFSET_BITS);
+        d_cache[set].dirty = true;
     }else{
         misses++;
-        block[set].tag = tag;
-        block[set].valid = 1;
-        block[set].data[off] = value;
+        if(d_cache[set].dirty){
+            storage_store_line((addr & ~0xF), d_cache[set].block);
+            d_cache[set].dirty = false;
+        }
+        storage_load_line((addr & ~0xF), d_cache[set].block);
+        memcpy(&d_cache[set].block[off], &value, 4);
+        d_cache[set].valid = true;
+		d_cache[set].dirty = true;
+		d_cache[set].tag = tag;
     }
-
-    block[set].dirty = 1;
 }
 
 void cache_direct_flush(){
     memory_address addr;
-    int set, off;
+    int set;
     for(set = 0; set < CACHE_ENTRIES; set++){
-        if(block[set].dirty == 1){
-            int tag = block[set].tag;
-            for(off = 0; off < OFFSET_BITS; off++){
-                addr = (tag << 8) & (set << 4) & off;
-                storage_store(addr, block[set].data[off]);
-            }
-            block[set].dirty = 0;
-        }
+        addr = (d_cache[set].tag << 4);
+        storage_store_line(addr, d_cache[set].block);
+        d_cache[set].dirty = false;
     }
 }
 

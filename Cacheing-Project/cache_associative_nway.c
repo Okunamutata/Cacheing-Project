@@ -1,77 +1,152 @@
-#include "storage.h"
-#include "cache_associative_nway.h"
 #include <stdio.h>
+#include <stdbool.h>
+#include <string.h>
+#include "cache_associative_nway.h"
 
-struct Block{
-    int valid;
+#define SETS (CACHE_ENTRIES / 2)
+
+struct NWAY_CACHE{
+    bool valid;
+    bool dirty;
     int tag;
-    int dirty;
-    int data[4];
-};
+    unsigned char block[CACHE_BLOCK_SIZE];
+    double timestamp;
+}na_cache[SETS][2];
 
-static struct Block block[16];
-static int hits;
-static int misses;
+static int hits,
+           misses;
 
-void cache_direct_init(){
+static double time;
+
+void cache_associative_nway_init(){
     int i, j;
-    for(i = 0; i < CACHE_ENTRIES; i++){
-        block[i].valid = 0;
-        block[i].tag = 0;
-        block[i].dirty = 0;
-        for(j = 0; j < CACHE_BLOCK_SIZE; j++){
-            block[i].data[j] = 0;
+    for(i = 0; i < SETS; i++){
+        for(j = 0; j < 2; j++){
+            na_cache[i][j].valid = false;
+            na_cache[i][j].dirty = false;
+            na_cache[i][j].timestamp = 0;
         }
     }
 
     hits = 0;
     misses = 0;
+    time = 0;
 }
 
-int cache_direct_load(memory_address addr){
-    int tag = addr & 0xFFFFFF00;
-    int set = addr & 0x000000F0;
-    int off = addr & 0x0000000F;
+int cache_associative_nway_load(memory_address addr){
+    int off =  addr       & 0xF;
+    int set = (addr >> 4) & 0xF;
+    int tag = (addr >> 8) & 0xFFFFFF;
 
-    if(block[set].valid == 1 && block[set].tag == tag){
-        hits++;
-        return block[set].data[off];
-    }else{
-        misses++;
-        return storage_load(addr);
+    unsigned int value;
+
+    int i;
+    for(i = 0; i < 2; i++){
+        if(na_cache[set][i].valid && na_cache[set][i].tag == tag){
+            hits++;
+            memcpy(&value, &na_cache[set][i].block[off], OFFSET_BITS);
+            na_cache[set][i].timestamp = time++;
+            na_cache[set][i].valid = true;
+            na_cache[set][i].dirty = true;
+            return value;
+        }
     }
-}
 
-void cache_direct_store(memory_address addr, int value){
-    int tag = (addr & 0xFFFFFF00) >> 8;
-    int set = (addr & 0x000000F0) >> 4;
-    int off = addr & 0x0000000F;
-
-    if(block[set].valid == 1 && block[set].tag == tag){
-        hits++;
-        block[set].data[off] = value;
-    }else{
-        misses++;
-        block[set].tag = tag;
-        block[set].valid = 1;
-        block[set].data[off] = value;
+    misses++;
+    for(i = 0; i < 2; i++){
+        if(!na_cache[set][i].valid){
+            storage_load_line((addr & ~0xF),na_cache[set][i].block);
+            memcpy(&value, &na_cache[set][i].block[off], OFFSET_BITS);
+            na_cache[set][i].timestamp = time++;
+            na_cache[set][i].valid = true;
+            na_cache[set][i].dirty = true;
+            na_cache[set][i].tag = tag;
+            return value;
+        }
     }
+
+    int least_used;
+    if(na_cache[set][0].timestamp < na_cache[set][1].timestamp){
+        least_used = 0;
+    }else{
+        least_used = 1;
+    }
+    if(na_cache[set][least_used].dirty){
+        storage_store_line((addr  & ~0xF), na_cache[set][least_used].block);
+        na_cache[set][least_used].dirty = false;
+    }
+    storage_load_line((addr & ~0xF), na_cache[set][least_used].block);
+    memcpy(&value, &na_cache[set][least_used].block[off], OFFSET_BITS);
+    na_cache[set][i].timestamp = time++;
+    na_cache[set][i].valid = true;
+    na_cache[set][i].dirty = true;
+    na_cache[set][i].tag = tag;
+    return value;
 }
 
-void cache_direct_flush(){
+void cache_associative_nway_store(memory_address addr, int value){
+    int off =  addr       & 0xF;
+    int set = (addr >> 4) & 0xF;
+    int tag = (addr >> 8) & 0xFFFFFF;
+
+    int i;
+    for(i = 0; i < 2; i++){
+        if(na_cache[set][i].valid && na_cache[set][i].tag == tag){
+            hits++;
+            memcpy(&na_cache[set][i].block[off], &value, OFFSET_BITS);
+            na_cache[set][i].timestamp = time++;
+            na_cache[set][i].valid = true;
+            na_cache[set][i].dirty = true;
+            return;
+        }
+    }
+
+    misses++;
+    for(i = 0; i < 2; i++){
+        if(!na_cache[set][i].valid){
+            storage_load_line((addr & ~0xF),na_cache[set][i].block);
+            memcpy(&na_cache[set][i].block[off], &value, OFFSET_BITS);
+            na_cache[set][i].timestamp = time++;
+            na_cache[set][i].valid = true;
+            na_cache[set][i].dirty = true;
+            na_cache[set][i].tag = tag;
+            return;
+        }
+    }
+
+    int least_used;
+    if(na_cache[set][0].timestamp < na_cache[set][1].timestamp){
+        least_used = 0;
+    }else{
+        least_used = 1;
+    }
+    if(na_cache[set][least_used].dirty){
+        storage_store_line((addr  & ~0xF), na_cache[set][least_used].block);
+        na_cache[set][least_used].dirty = false;
+    }
+    storage_load_line((addr & ~0xF), na_cache[set][least_used].block);
+    memcpy(&na_cache[set][least_used].block[off], &value, OFFSET_BITS);
+    na_cache[set][i].timestamp = time++;
+    na_cache[set][i].valid = true;
+    na_cache[set][i].dirty = true;
+    na_cache[set][i].tag = tag;
+    return;
+}
+
+void cache_associative_nway_flush(){
     memory_address addr;
-    int set, off;
-    for(set = 0; set < CACHE_ENTRIES; set++){
-        if(block[set].dirty == 1){
-            int tag = block[set].tag;
-            for(off = 0; off < OFFSET_BITS; off++){
-                addr = (tag << 8) & (set << 4) & off;
-                storage_store(addr, block[set].data[off]);
-            }
+    int set, line;
+    for(set = 0; set < SETS; set++){
+        for(line = 0; line < 2; line++){
+            addr = na_cache[set][line].tag << 4;
+            addr |= (set & 0xF);
+            addr = addr << 4;
+            storage_store_line(addr, na_cache[set][line].block);
+            na_cache[set][line].dirty = false;
         }
     }
 }
 
-void cache_direct_stats(){
+void cache_associative_nway_stats(){
     printf("cache direct stats:  hits: %d  misses: %d", hits, misses);
 }
