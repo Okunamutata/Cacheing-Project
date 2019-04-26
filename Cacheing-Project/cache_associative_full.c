@@ -142,6 +142,6 @@ void cache_associative_full_flush(){
     }
 }
 
-void cache_associative_nway_stats(){
+void cache_associative_full_stats(){
     printf("cache direct stats:  hits: %d  misses: %d", hits, misses);
 }
