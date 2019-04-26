@@ -48,6 +48,8 @@ gcc -std=c99 -Wall -g \
     -L/Users/tokunna/GitHub/Cacheing-Project/Cacheing-Project/test 
     -ltest
 
+ ldd test_transpose_8x8
+
 
 
 export LD_LIBRARY_PATH=/Users/tokunna/GitHub/Cacheing-Project/Cacheing-Project
