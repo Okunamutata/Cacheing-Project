@@ -44,4 +44,4 @@ gcc -std=c99 -Wall -g \
 
 
 
-export LD_LIBRARY_PATH=/Users/tokunna/GitHub/Cacheing-Project/Cacheing-Project
+export LD_LIBRARY_PATH=`pwd`

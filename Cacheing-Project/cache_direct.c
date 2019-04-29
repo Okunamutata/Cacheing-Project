@@ -3,16 +3,22 @@
 #include <stdbool.h>
 #include "cache_direct.h"
 
+/*
+*   structure for the cache entries
+*   held in an array 
+*/
 struct DIRECT_CACHE{
     bool valid;
     bool dirty;
     int tag;
-    unsigned char block[CACHE_BLOCK_SIZE];
+    unsigned char block[CACHE_BLOCK_SIZE]; 
 } d_cache[CACHE_ENTRIES];
 
 static int hits,
            misses;
 
+
+//initialize the cache
 void cache_direct_init(){
     int i;
     for(i = 0; i < CACHE_ENTRIES; i++){
@@ -24,6 +30,7 @@ void cache_direct_init(){
     misses = 0;
 }
 
+// save data from given memory address
 int cache_direct_load(memory_address addr){
     int off =  addr       & 0xF;
     int set = (addr >> 4) & 0xF;
@@ -63,7 +70,8 @@ void cache_direct_store(memory_address addr, int value){
             d_cache[set].dirty = false;
         }
         storage_load_line((addr & ~0xF), d_cache[set].block);
-        memcpy(&d_cache[set].block[off], &value, 4);
+        stroage_store_line((addr & ~0xF ), d_cache[set].block);
+        memcpy(&d_cache[set].block[off], &value, sizeof(value));
         d_cache[set].valid = true;
 		d_cache[set].dirty = true;
 		d_cache[set].tag = tag;
